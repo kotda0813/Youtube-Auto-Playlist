@@ -35,7 +35,6 @@
   };
 
   const closeOpenOverlays = async () => {
-    // 言語に依存せず閉じるボタン（アイコンボタン）とオーバーレイ背景を取得
     const closeSelectors = [
       'ytd-add-to-playlist-renderer yt-icon-button button',
       'ytd-add-to-playlist-renderer #close-button button',
@@ -62,11 +61,18 @@
   let lastVideoCount = 0;
   let unchangedScrolls = 0;
 
-  const getVideoCards = () => [
-    ...document.querySelectorAll(
-      'ytd-rich-item-renderer, ytd-grid-video-renderer, ytd-video-renderer'
-    ),
-  ];
+  const getVideoCards = () => {
+    const activePage =
+      [...document.querySelectorAll('ytd-browse[role="main"], ytd-search[role="main"], ytd-browse:not([hidden])')].find(
+        el => !el.hasAttribute('hidden') && isVisible(el)
+      ) || document;
+
+    return [
+      ...activePage.querySelectorAll(
+        'ytd-rich-item-renderer, ytd-grid-video-renderer, ytd-video-renderer'
+      ),
+    ].filter(card => !card.closest('[hidden]') && isVisible(card));
+  };
 
   const extractVideoId = card => {
     const link = card.querySelector('a[href*="/watch?v="], a[href*="/shorts/"]');
@@ -83,16 +89,10 @@
     }
   };
 
-  /**
-   * 元のコードの [...card.querySelectorAll('button')].find(...) を維持しつつ、
-   * 日本語 'その他の操作' に依存せず全言語で3点メニューボタンを特定する
-   */
   const findCardMenuButton = card => {
-    // 1. まず全ボタンを取得（ホバー前は opacity: 0 や display: none になっていることがあるため isVisible を必須にしない）
     const allButtons = [...card.querySelectorAll('button')];
     if (allButtons.length === 0) return null;
 
-    // 2. 縦3点リーダーのSVGパス形状で特定（全言語・全UI共通）
     const threeDotsBtn = allButtons.find(btn => {
       const d = btn.querySelector('path')?.getAttribute('d') || '';
       return d.includes('M12 16.5c.83 0 1.5.67 1.5 1.5s-.67 1.5-1.5 1.5-1.5-.67-1.5-1.5.67-1.5 1.5-1.5zM10.5 12c0 .83.67 1.5 1.5 1.5s1.5-.67 1.5-1.5-.67-1.5-1.5-1.5-1.5.67-1.5 1.5zm0-6c0 .83.67 1.5 1.5 1.5s1.5-.67 1.5-1.5-.67-1.5-1.5-1.5-1.5.67-1.5 1.5z') ||
@@ -100,13 +100,11 @@
     });
     if (threeDotsBtn) return threeDotsBtn;
 
-    // 3. ytd-menu-renderer や新UIのメニューコンテナ内のボタンを優先
     const menuRendererBtn = card.querySelector(
       'ytd-menu-renderer button, yt-lockup-metadata-view-model button, #menu button'
     );
     if (menuRendererBtn) return menuRendererBtn;
 
-    // 4. YouTubeの3点メニューボタンは全言語共通で aria-label に「動画タイトル」が含まれる仕様を利用
     const titleEl = card.querySelector('#video-title, h3 a, a#video-title-link, yt-lockup-metadata-view-model h3');
     const videoTitle = (titleEl?.textContent || '').trim();
     if (videoTitle) {
@@ -116,7 +114,6 @@
       if (titleMatch) return titleMatch;
     }
 
-    // 5. フォールバック: サムネイル内のボタン（「後で見る」等）を除外した最後のボタン
     const nonThumbButtons = allButtons.filter(
       btn => !btn.closest('#thumbnail, ytd-thumbnail, yt-thumbnail-view-model')
     );
@@ -127,9 +124,6 @@
     return allButtons[allButtons.length - 1];
   };
 
-  /**
-   * 元のコードのメニュー項目検索を維持しつつ、全言語で「再生リストに保存」を特定する
-   */
   const findSaveToPlaylistMenuItem = () => {
     const items = [
       ...document.querySelectorAll(
@@ -139,7 +133,6 @@
 
     if (items.length === 0) return null;
 
-    // 1. 主要言語のテキストマッチ
     const saveKeywords = [
       '再生リストに保存', 'Save to playlist', 'Guardar en lista', 'Enregistrer dans',
       'In Playlist speichern', 'Salva nella playlist', 'Salvar na playlist',
@@ -153,7 +146,6 @@
     });
     if (keywordMatch) return keywordMatch;
 
-    // 2. YouTube「再生リストに保存」アイコンのSVGパス形状マッチ（全言語共通）
     const svgMatch = items.find(el => {
       const d = el.querySelector('path')?.getAttribute('d') || '';
       return d.includes('M22 13h-4v4h-2v-4h-4v-2h4V7h2v4h4v2') ||
@@ -161,7 +153,6 @@
     });
     if (svgMatch) return svgMatch;
 
-    // 3. フォールバック: 通常の動画メニュー構造における3番目の項目（「後で見る」の次）
     if (items.length >= 4) {
       return items[2];
     }
@@ -169,22 +160,28 @@
     return null;
   };
 
-  /**
-   * 元のコードの findPlaylistButton を維持しつつ、言語ごとの公開設定ラベル差を吸収
-   */
-  const findPlaylistButton = name =>
-    [...document.querySelectorAll('button[role="menuitem"], tp-yt-paper-item, ytd-playlist-add-to-option-renderer')].find(el => {
-      if (!isVisible(el)) return false;
+  const findPlaylistButton = name => {
+    const activeDialog =
+      [
+        ...document.querySelectorAll(
+          'ytd-add-to-playlist-renderer, tp-yt-iron-dropdown:not([aria-hidden="true"]), ytd-popup-container tp-yt-paper-dialog'
+        ),
+      ].find(isVisible) || document;
+
+    const candidates = [
+      ...activeDialog.querySelectorAll(
+        'ytd-playlist-add-to-option-renderer, button[role="menuitem"], tp-yt-paper-item'
+      ),
+    ].filter(isVisible);
+
+    return candidates.find(el => {
       const ariaLabel = (el.getAttribute('aria-label') || '').trim();
-      const titleEl = el.querySelector('#label, yt-formatted-string');
+      const titleEl = el.querySelector('#label, yt-formatted-string, .yt-core-attributed-string');
       const text = (titleEl ? titleEl.textContent : el.textContent || '').trim();
-      return (
-        ariaLabel === name ||
-        ariaLabel.startsWith(`${name},`) ||
-        ariaLabel.startsWith(`${name} `) ||
-        text === name
-      );
+
+      return text === name || ariaLabel === name || ariaLabel.startsWith(`${name},`);
     });
+  };
 
   const recordFailure = message => {
     failedCount++;
@@ -209,7 +206,6 @@
 
       try {
         card.scrollIntoView({ behavior: 'instant', block: 'center' });
-        // ホバー時のみ3点メニューボタンを表示・描画するUI対策
         card.dispatchEvent(new MouseEvent('mouseenter', { bubbles: true }));
         card.dispatchEvent(new MouseEvent('mouseover', { bubbles: true }));
         await sleep(CONFIG.afterScrollWaitMs);
@@ -221,11 +217,16 @@
           continue;
         }
 
-        // CSSで非表示状態のままでも確実にクリックを通す
         menuButton.click();
         await sleep(CONFIG.afterMenuClickWaitMs);
 
-        const saveMenuItem = await waitFor(() => findSaveToPlaylistMenuItem());
+        let saveMenuItem = await waitFor(() => findSaveToPlaylistMenuItem());
+
+        if (!saveMenuItem) {
+          menuButton.click();
+          await sleep(CONFIG.afterMenuClickWaitMs);
+          saveMenuItem = await waitFor(() => findSaveToPlaylistMenuItem());
+        }
 
         if (!saveMenuItem) {
           recordFailure(`Item #${processedIds.size} (${videoId}): "Save to playlist" option not found`);
